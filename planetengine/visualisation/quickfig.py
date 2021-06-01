@@ -34,6 +34,7 @@ class QuickFig(_Fig):
 
         self.fig = glucifer.Figure(
             facecolour = facecolour,
+            edgecolour = edgecolour,
             quality = 3.,
             **kwargs
             )
