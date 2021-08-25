@@ -9,7 +9,7 @@ import string
 import time
 from contextlib import contextmanager
 from functools import wraps
-from signal import signal, SIGTERM, SIG_DFL
+from signal import signal, getsignal, SIGTERM
 
 from .utilities import message
 from . import mpi
@@ -121,6 +121,7 @@ class H5Wrap:
             H5FILES[self.filename] = self.arg.h5file
             return True
     def __enter__(self):
+        self._priorhandler = getsignal(SIGTERM)
         signal(SIGTERM, self._signal_handler)
         while True:
             try:
@@ -134,7 +135,7 @@ class H5Wrap:
         return None
     def _signal_handler(self, sig, frame):
         self.__exit__(None, None, None)
-        sys.exit(0)
+        sys.exit(sig)
     @mpi.dowrap
     def _close_h5file(self):
         global H5FILES
@@ -147,7 +148,7 @@ class H5Wrap:
         if self.master:
             # mpi.message("Logging out at", time.time())
             release(self.filename, self.lockcode)
-        signal(SIGTERM, SIG_DFL)
+        signal(SIGTERM, self._priorhandler)
 
 class SetMask:
     # expects @mpi.dowrap
