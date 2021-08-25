@@ -202,9 +202,9 @@ class Campaign:
                         with open(str(incfilepath), mode = 'r+') as incfile:
                             incfile.write(jobid)
         except (ExhaustedError, FileNotFoundError) as exc:
-            jobfilepath.unlink()
-            logfilepath.unlink()
-            incfilepath.unlink()
+            jobfilepath.unlink(missing_ok=True)
+            logfilepath.unlink(missing_ok=True)
+            incfilepath.unlink(missing_ok=True)
             raise exc
 
     def run(self):
