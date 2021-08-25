@@ -250,9 +250,9 @@ class Campaign:
             sys.exit(exc.args[0])
         except subprocess.TimeoutExpired:
             Job.get_logger(jobfilepath)(
-                f"Timed out after {str(self.timeout)} seconds"
-                f" ({str(round(self.timeout / 86400, 3))} days).\n"
-                f"{TIMEOUTCODE}"
+                "Timed out after " + str(self.timeout) + " seconds "
+                + str(round(self.timeout / 86400, 3)) + " days).\n"
+                + TIMEOUTCODE
                 )
         except subprocess.CalledProcessError as exc:
             ret = exc.returncode
