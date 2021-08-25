@@ -93,7 +93,6 @@ def release(filename, password = ''):
     try:
         with open(lockfilename, 'r') as f:
             if f.read() == password:
-                while 
                 os.remove(lockfilename)
             else:
                 raise AccessForbidden
