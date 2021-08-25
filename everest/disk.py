@@ -9,6 +9,7 @@ import string
 import time
 from contextlib import contextmanager
 from functools import wraps
+from signal import signal, SIGTERM, SIG_DFL
 
 from .utilities import message
 from . import mpi
@@ -92,6 +93,7 @@ def release(filename, password = ''):
     try:
         with open(lockfilename, 'r') as f:
             if f.read() == password:
+                while 
                 os.remove(lockfilename)
             else:
                 raise AccessForbidden
@@ -120,6 +122,7 @@ class H5Wrap:
             H5FILES[self.filename] = self.arg.h5file
             return True
     def __enter__(self):
+        signal(SIGTERM, self._signal_handler)
         while True:
             try:
                 self.master = lock(self.filename, self.lockcode)
@@ -130,6 +133,9 @@ class H5Wrap:
         # if self.master:
         #     mpi.message("Logging in at", time.time())
         return None
+    def _signal_handler(self, sig, frame):
+        self.__exit__(None, None, None)
+        sys.exit(0)
     @mpi.dowrap
     def _close_h5file(self):
         global H5FILES
@@ -142,6 +148,7 @@ class H5Wrap:
         if self.master:
             # mpi.message("Logging out at", time.time())
             release(self.filename, self.lockcode)
+        signal(SIGTERM, SIG_DFL)
 
 class SetMask:
     # expects @mpi.dowrap
@@ -211,3 +218,4 @@ def local_import_from_str(scriptString):
             as tempfile:
         imported = local_import(tempfile)
     return imported
+
