@@ -9,9 +9,11 @@ import time
 from pathlib import Path
 import random
 import itertools
+import functools
 import datetime
+import traceback
 from contextlib import contextmanager
-from signal import signal, SIGTERM, SIG_DFL
+from signal import signal, getsignal, SIGTERM
 from collections import abc as collabc
 
 import numpy as np
@@ -29,69 +31,74 @@ ERRORCODE = '---ERROR---'
 JOBSUFFIX = '.campaign.job'
 INCSUFFIX = '.campaign.inc'
 
+
 class Job(collabc.Sequence):
 
     def __init__(self, *dims):
         self.dims = dims
-        _, logfilepath, campaigname, jobid, *selectors = sys.argv
-        self.workdir = workdir
+        _, logfilepath, campaignname, jobid, *selectors = sys.argv
         self.campaignname = campaignname
-        self.logfilepath = logfilepath
+        self.logfilepath = Path(logfilepath)
         self.jobid = jobid
         self.jobno = int(jobid)
-        self.selectors = tuple(self.proc_arg(arg) for arg in self.selectors)
+        self.selectors = tuple(self.proc_arg(arg) for arg in selectors)
 
     def __enter__(self):
+        self._priorsignal = getsignal(SIGTERM)
         signal(SIGTERM, self._signal_handler)
         self.logfile = open(self.logfilepath, mode='r+')
         self.log = self.get_logger(self.logfile)
-        self.job = self.get_job()
+        try:
+            self.job = self.get_job()
+        except ExhaustedError as exc:
+            return self.__exit__(type(exc), None, None)
         return self
 
     def _signal_handler(self, sig, frame):
         self.__exit__(SystemExit, sig, None)
-        sys.exit(sig)
 
-    def __exit__(self, exctyp, excvalue, traceback):
-        signal(SIGTERM, SIG_DFL)
+    def __exit__(self, exctyp, excvalue, trace):
+        signal(SIGTERM, self._priorsignal)
         try:
-            try:
-                if exctyp is None:
-                    global COMPLETEDCODE
-                    self.log(COMPLETEDCODE)
-                    sys.exit(100)
-                elif issubclass(exctyp, SystemExit):
-                    self.log(INCOMPLETECODE)
-                    sys.exit(101)
-                elif issubclass(exctyp, ExhaustedError):
-                    sys.exit(102)
-                else:
-                    self.log(
-                        ERRORCODE + '\n'
-                        + str(exctyp(excvalue)) + '\n\n'
-                        + str(traceback)
-                        )
-                    sys.exit(103)
-            finally:
-                self.logfile.close()
-        except SystemExit as exc:
-            if exc.code == 102:
-                self.logfilepath.unlink()
-            raise exc
+            if exctyp is None:
+                global COMPLETEDCODE
+                self.log(COMPLETEDCODE)
+                sys.exit(100)
+            elif issubclass(exctyp, SystemExit):
+                self.log(INCOMPLETECODE)
+                sys.exit(101)
+            elif issubclass(exctyp, ExhaustedError):
+                self.log(EXHAUSTEDCODE)
+                sys.exit(102)
+            else:
+                self.log()
+                traceback.print_tb(trace, file=self.logfile)
+                self.logfile.write(ERRORCODE + '\n')
+                sys.exit(103)
+        finally:
+            self.logfile.close()
         assert False, "Job __exit__ should never complete!"
 
     @staticmethod
-    def get_logger(logfile):
+    def get_logger(arg):
     #     @mpi.dowrap
-        def log(*messages, logfile=logfile):
+        def log(*messages, logfile):
             logfile.write('\n')
             logfile.write(str(datetime.datetime.now()))
             for msg in messages:
                 logfile.write('\n')
-                logfile.write(msg)
+                logfile.write(str(msg))
             logfile.write('\n')
             logfile.flush()
-        return log
+        if isinstance(arg, Path):
+            arg = str(arg)
+        if isinstance(arg, str):
+            def log_func(*messages, logfile=arg):
+                with open(logfile, mode='r+') as file:
+                    return log(*messages, logfile=file)
+        else:
+            log_func = functools.partial(log, logfile=arg)
+        return log_func
 
     @staticmethod
     def proc_arg(astr):
@@ -111,9 +118,10 @@ class Job(collabc.Sequence):
             return els[0]
         return slice(*els)
 
-    def get_jobs(self, dims):
+    def get_jobs(self):
+        dims = self.dims
         combos = np.array(list(itertools.product(*dims))).reshape(
-            *(len(dim) for dim in self.dims), len(self)
+            *map(len, dims), len(self)
             )
         return combos[self.selectors]
 
@@ -157,15 +165,13 @@ class Campaign:
             workdir,
             campaignname + '.campaign.lock'
             )
-        self.jobroot = Path(workdir, campaignname)
+        jobroot = self.jobroot = Path(workdir, campaignname)
 
     def get_jobfilepath(self, jobid):
-        global JOBSUFFIX
         return Path(
             str(self.jobroot) + '_' + jobid.zfill(12) + JOBSUFFIX
             )
     def get_incfilepath(self, jobid):
-        global INCSUFFIX
         return Path(
             str(self.jobroot) + '_' + jobid.zfill(12) + INCSUFFIX
             )
@@ -189,7 +195,7 @@ class Campaign:
     def choose_job(self):
         with self.lock():
             incompletes = glob.glob(
-                glob.escape(str(self.jobroot)) + '*' + self.INCSUFFIX
+                glob.escape(str(self.jobroot)) + '*' + INCSUFFIX
                 )
             if incompletes:
                 incfilename = incompletes[0]
@@ -198,7 +204,7 @@ class Campaign:
                 os.remove(incfilename)
             else:
                 jobfilepaths = glob.glob(
-                    glob.escape(str(self.jobroot)) + '*' + self.JOBSUFFIX
+                    glob.escape(str(self.jobroot)) + '*' + JOBSUFFIX
                     )
                 jobids = [
                     int(jobfilepath.rstrip('.campaign.job')[-12:])
@@ -213,35 +219,54 @@ class Campaign:
                 self.get_jobfilepath(jobid).touch(exist_ok = False)
             return jobid
 
+    def _signal_handler(self, sig, stack):
+        raise SystemExit(sig)
+
     def run_job(self, jobid):
         incfilepath = self.get_incfilepath(jobid)
+        jobfilepath = self.get_jobfilepath(jobid)
         args = (
-            jobfilepath,
+            str(jobfilepath),
             self.campaignname,
             jobid,
             *self.args
             )
-        cmd = ['python3', scriptname, *args]
+        cmd = ['python3', self.name, *args]
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            )
+        prior_handler = getsignal(SIGTERM)
+        signal(SIGTERM, self._signal_handler)
         try:
-            completed = subprocess.run(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True,
-                timeout=self.timeout
+            ret = proc.wait(self.timeout)
+            if ret != 0:
+                raise subprocess.CalledProcessError(ret, cmd)
+        except SystemExit as exc:
+            proc.terminate()
+            proc.wait()
+            sys.exit(exc.args[0])
+        except subprocess.TimeoutExpired:
+            Job.get_logger(jobfilepath)(
+                f"Timed out after {str(self.timeout)} seconds"
+                f" ({str(round(self.timeout / 86400, 3))} days).\n"
+                f"{TIMEOUTCODE}"
                 )
         except subprocess.CalledProcessError as exc:
             ret = exc.returncode
             if ret >= 100:
                 if ret == 101:
                     incfilepath.touch(exist_ok=False)
-                    with open(str(incfilepath), mode='r+') as incfile:
-                        incfile.write(jobid)
+                    Job.get_logger(incfilepath)(jobid)
                 elif ret == 102:
+                    jobfilepath.unlink()
                     raise ExhaustedError
             else:
                 sys.exit(2)
+        finally:
+            signal(SIGTERM, prior_handler)
 
     def run(self):
         while True:
@@ -250,8 +275,6 @@ class Campaign:
                 self.run_job(job)
             except ExhaustedError:
                 break
-            except subprocess.TimeoutExpired:
-                continue
 
 
 if __name__ == '__main__':
