@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 import numpy as np
 
-from everest import mpi
+# from everest import mpi
 
 
 def proc_arg(astr):
@@ -61,7 +61,7 @@ def get_job(dims, argn, counter, *, log):
     return tuple(float(a) for a in job)
 
 def get_logger(logfile):
-    @mpi.dowrap
+#     @mpi.dowrap
     def log(*messages):
         logfile.write('\n')
         logfile.write(str(datetime.datetime.now()))
@@ -211,8 +211,6 @@ class Campaign:
             job = self.choose_job()
             try:
                 self.run_job(job)
-            except subprocess.TimeoutExpired:
-                continue
             except ExhaustedError:
                 break
 
