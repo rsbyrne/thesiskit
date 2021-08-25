@@ -170,7 +170,6 @@ class Campaign:
                     'python3', scriptname,
                     self.campaignname, str(logfilepath), jobid, *self.args
                     ]
-
                 try:
                     completed = subprocess.run(
                         cmd,
@@ -188,6 +187,8 @@ class Campaign:
                         )
                     jobfile.write('\n' + TIMEOUTCODE)
                 except subprocess.CalledProcessError as exc:
+                    if exc.returncode == 2:
+                        raise FileNotFoundError(scriptname)
                     with open(str(logfilepath), mode = 'r') as logfile:
                         logtext = logfile.read()
                     if EXHAUSTEDCODE in logtext:
@@ -200,7 +201,7 @@ class Campaign:
                         incfilepath.touch(exist_ok = False)
                         with open(str(incfilepath), mode = 'r+') as incfile:
                             incfile.write(jobid)
-        except ExhaustedError as exc:
+        except (ExhaustedError, FileNotFoundError) as exc:
             jobfilepath.unlink()
             logfilepath.unlink()
             incfilepath.unlink()
