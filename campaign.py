@@ -24,7 +24,11 @@ def proc_arg(astr):
     if astr[0] == '(' and astr[-1] == ')':
         return list(proc_arg(st) for st in astr[1:-1].split(','))
     els = astr.split(':')
-    els = tuple(None if (el == 'None' or el == '') else int(el) for el in els)
+    els = tuple(
+        None if (el == 'None' or el == '')
+        else int(el)
+        for el in els
+        )
     nels = len(els)
     if nels == 1:
         return els[0]
@@ -160,60 +164,55 @@ class Campaign:
         logfilepath = self.get_logfilepath(jobid)
         incfilepath = self.get_incfilepath(jobid)
         scriptname = self.name
-        if not os.path.isfile(scriptname):
-            raise FileNotFoundError(scriptname)
         try:
             with open(str(jobfilepath), mode = 'r+') as jobfile:
                 cmd = [
                     'python3', scriptname,
                     self.campaignname, str(logfilepath), jobid, *self.args
                     ]
-                proc = subprocess.Popen(
-                    cmd,
-                    stdin = subprocess.DEVNULL,
-                    stdout = subprocess.DEVNULL,
-                    stderr = jobfile,
-                    )
-                ret = -1
+
                 try:
-                    ret = proc.wait(timeout = self.timeout)
+                    completed = subprocess.run(
+                        cmd,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=jobfile,
+                        check=True,
+                        timeout=self.timeout
+                        )
                 except subprocess.TimeoutExpired as exc:
-                    ret = 'timeout'
-                    raise Exception from exc
-                except Exception as exc:
-                    proc.terminate()
-                    ret = -1
-                    raise Exception from exc
-                finally:
-                    if ret == 'timeout':
-                        jobfile.write('\n' + "Timed out after specified time (s): " + self.timeout)
-                        jobfile.write('\n' + TIMEOUTCODE)
-                    elif ret == 0:
+                    jobfile.write(
+                        '\n'
+                        "Timed out after specified time (s): "
+                        + str(self.timeout)
+                        )
+                    jobfile.write('\n' + TIMEOUTCODE)
+                except subprocess.CalledProcessError as exc:
+                    with open(str(logfilepath), mode = 'r') as logfile:
+                        logtext = logfile.read()
+                    if EXHAUSTEDCODE in logtext:
+                        raise ExhaustedError
+                else:
+                    if completed.returncode == 0:
                         jobfile.write('\n' + COMPLETEDCODE)
-                    elif ret < 0:
+                    else:  # hence terminated by signal
                         jobfile.write('\n' + INCOMPLETECODE)
                         incfilepath.touch(exist_ok = False)
                         with open(str(incfilepath), mode = 'r+') as incfile:
                             incfile.write(jobid)
-                    else:
-                        with open(str(logfilepath), mode = 'r') as logfile:
-                            logtext = logfile.read()
-                        if EXHAUSTEDCODE in logtext:
-                            raise ExhaustedError
-                        exc = subprocess.CalledProcessError(ret, cmd)
-                        jobfile.write('\n' + str(exc))
-                        raise exc
         except ExhaustedError as exc:
             jobfilepath.unlink()
             logfilepath.unlink()
             incfilepath.unlink()
-            raise ExhaustedError from exc
+            raise exc
 
     def run(self):
         while True:
             job = self.choose_job()
             try:
                 self.run_job(job)
+            except subprocess.TimeoutExpired:
+                continue
             except ExhaustedError:
                 break
 
@@ -223,12 +222,14 @@ if __name__ == '__main__':
     _, name, *allargs = sys.argv # name of campaign, passed args
     flagargs = [arg for arg in allargs if arg.startswith('--')]
     kwargs = {
-        k.strip():v.strip() for k, v in (flagarg[2:].split('=') for flagarg in flagargs)
+        k.strip():v.strip() for k, v in (
+            flagarg[2:].split('=') for flagarg in flagargs
+            )
         }
     args = [arg for arg in allargs if not arg in flagargs]
     if not args:
         args = [':',]
-    
+
     name = os.path.abspath(name)
     workdir = os.path.dirname(name)
 
@@ -243,3 +244,4 @@ if __name__ == '__main__':
 
 
 ################################################################################
+
