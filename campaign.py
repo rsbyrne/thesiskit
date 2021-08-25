@@ -159,10 +159,13 @@ class Campaign:
         jobfilepath = self.get_jobfilepath(jobid)
         logfilepath = self.get_logfilepath(jobid)
         incfilepath = self.get_incfilepath(jobid)
+        scriptname = self.name
+        if not os.path.isfile(scriptname):
+            raise FileNotFoundError(scriptname)
         try:
             with open(str(jobfilepath), mode = 'r+') as jobfile:
                 cmd = [
-                    'python3', self.name,
+                    'python3', scriptname,
                     self.campaignname, str(logfilepath), jobid, *self.args
                     ]
                 proc = subprocess.Popen(
@@ -199,6 +202,7 @@ class Campaign:
                             raise ExhaustedError
                         exc = subprocess.CalledProcessError(ret, cmd)
                         jobfile.write('\n' + str(exc))
+                        raise exc
         except ExhaustedError as exc:
             jobfilepath.unlink()
             logfilepath.unlink()
@@ -239,4 +243,3 @@ if __name__ == '__main__':
 
 
 ################################################################################
-
