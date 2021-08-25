@@ -187,21 +187,22 @@ class Campaign:
                         )
                     jobfile.write('\n' + TIMEOUTCODE)
                 except subprocess.CalledProcessError as exc:
-                    if exc.returncode == 2:
-                        raise FileNotFoundError(scriptname)
-                    with open(str(logfilepath), mode = 'r') as logfile:
-                        logtext = logfile.read()
-                    if EXHAUSTEDCODE in logtext:
-                        raise ExhaustedError
-                else:
-                    if completed.returncode == 0:
-                        jobfile.write('\n' + COMPLETEDCODE)
-                    else:  # hence terminated by signal
+                    ret = exc.returncode
+                    if ret == 1:
+                        with open(str(logfilepath), mode = 'r') as logfile:
+                            logtext = logfile.read()
+                        if EXHAUSTEDCODE in logtext:
+                            raise ExhaustedError
+                    elif ret < 0:  # hence terminated by signal
                         jobfile.write('\n' + INCOMPLETECODE)
                         incfilepath.touch(exist_ok = False)
                         with open(str(incfilepath), mode = 'r+') as incfile:
                             incfile.write(jobid)
-        except (ExhaustedError, FileNotFoundError) as exc:
+                    else:  # assume some kind of internal error
+                        pass
+                else:
+                    jobfile.write('\n' + COMPLETEDCODE)
+        except ExhaustedError as exc:
             # needed for Python 3.5 compatibility
             for path in (jobfilepath, logfilepath, incfilepath):
                 try:
