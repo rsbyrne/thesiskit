@@ -46,7 +46,7 @@ class Job(collabc.Sequence):
     def __enter__(self):
         self._priorsignal = getsignal(SIGTERM)
         signal(SIGTERM, self._signal_handler)
-        self.logfile = open(self.logfilepath, mode='r+')
+        self.logfile = self.logfilepath.open(mode='r+')
         self.log = self.get_logger(self.logfile)
         try:
             self.job = self.get_job()
@@ -90,12 +90,12 @@ class Job(collabc.Sequence):
                 logfile.write(str(msg))
             logfile.write('\n')
             logfile.flush()
-        if isinstance(arg, Path):
-            arg = str(arg)
         if isinstance(arg, str):
-            def log_func(*messages, logfile=arg):
-                with open(logfile, mode='r+') as file:
-                    return log(*messages, logfile=file)
+            arg = Path(arg)
+        if isinstance(arg, Path):
+            def log_func(*messages, logfile=arg, log=log):
+                with logfile.open(mode='r+') as file:
+                    log(*messages, logfile=file)
         else:
             log_func = functools.partial(log, logfile=arg)
         return log_func
