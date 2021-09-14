@@ -254,6 +254,8 @@ class Campaign:
                 + str(round(self.timeout / 86400, 3)) + " days).\n"
                 + TIMEOUTCODE
                 )
+            proc.terminate()
+            proc.wait()
         except subprocess.CalledProcessError as exc:
             ret = exc.returncode
             if ret >= 100:
